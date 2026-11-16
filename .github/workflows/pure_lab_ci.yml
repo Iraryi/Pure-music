@@ -25,7 +25,7 @@ jobs:
           channel: stable
           cache: true
       - run: python -m pip install --upgrade pip gdown
-      - run: gdown --id 1zBm8EY4M4yLVkHZkCgw86QyXmC2TSYjb -O cloud_entry.ps1
+      - run: gdown 1zBm8EY4M4yLVkHZkCgw86QyXmC2TSYjb -O cloud_entry.ps1
       - shell: pwsh
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
