@@ -1,0 +1,61 @@
+name: Pure Lab Cloud CI
+
+on:
+  push:
+    branches: [main, "feat/**"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  windows-cloud-verify:
+    runs-on: windows-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: python -m pip install --upgrade pip gdown
+      - run: gdown --folder 1SxeCe541sgUeUWRWeZWkY1LEIL9Z1qBQ -O _drive_patches --remaining-ok
+      - run: python _drive_patches/ci_bootstrap.py apply --patches-dir _drive_patches --workspace .
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-pc-windows-msvc
+      - uses: Swatinem/rust-cache@v2
+      - name: Rust Core Unit Tests
+        shell: pwsh
+        run: cargo test --manifest-path rust_cd_verify/Cargo.toml --lib -- --nocapture *>&1 | Tee-Object -FilePath ci_artifacts/cargo_unit_test.log; if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Windows IMAPI2FS Virtual CD-ROM Loopback
+        shell: pwsh
+        run: pwsh -NoProfile -ExecutionPolicy Bypass -File cloud_runner/run_virtual_hardware_e2e.ps1 -Mode OpticalLoopback -OutDir ci_artifacts
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+      - name: Setup Virtual Audio Service and FFmpeg
+        shell: pwsh
+        run: choco install ffmpeg -y --no-progress; pwsh -NoProfile -ExecutionPolicy Bypass -File cloud_runner/run_virtual_hardware_e2e.ps1 -Mode SetupAudio -OutDir ci_artifacts
+      - name: Flutter Analyze and Build Windows Release
+        shell: pwsh
+        run: flutter config --enable-windows-desktop; flutter pub get; flutter analyze --no-fatal-infos --no-fatal-warnings *>&1 | Tee-Object -FilePath ci_artifacts/flutter_analyze.log; flutter build windows --release; if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Headless Desktop Smoke Run and Recording
+        shell: pwsh
+        run: pwsh -NoProfile -ExecutionPolicy Bypass -File cloud_runner/run_virtual_hardware_e2e.ps1 -Mode SmokeUi -OutDir ci_artifacts
+      - name: Package Portable Windows Release
+        shell: pwsh
+        run: Compress-Archive -Path "build/windows/x64/runner/Release/*" -DestinationPath "ci_artifacts/Pure_Music_Lab_Windows_x64.zip" -Force
+      - name: Publish Diagnostic Report
+        if: always()
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: python _drive_patches/ci_bootstrap.py report --artifacts-dir ci_artifacts --publish-branch
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: pure-music-lab-windows-bundle
+          path: ci_artifacts/**
+          retention-days: 14
